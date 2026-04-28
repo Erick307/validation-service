@@ -67,13 +67,16 @@ export function buildUserMessage(
   return {
     role: 'user',
     content: [
+      // The @anthropic-ai/sdk v0.24 typings only include base64 image sources;
+      // URL-sourced images are supported by the API but not yet reflected in
+      // the type definitions. Cast via unknown to satisfy the compiler.
       {
         type: 'image',
         source: {
           type: 'url',
           url: imageUrl,
         },
-      } as Anthropic.ImageBlockParam,
+      } as unknown as Anthropic.ImageBlockParam,
       {
         type: 'text',
         text: `Submitted metadata:\n${JSON.stringify(metadata, null, 2)}`,

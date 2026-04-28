@@ -4,11 +4,11 @@ import { QUEUE_NAME } from '../services/queue';
 import { JobPayloadSchema } from '../schemas/jobPayload';
 import { callLLM } from '../services/llm';
 import { persistResult, persistFailure } from '../services/resultProcessor';
-import { withTransaction, updateRequestStatus, insertAuditLog, getPool } from '../services/db';
+import { insertAuditLog, getPool } from '../services/db';
 import { ImageMetadata } from '../models/types';
 
 // ---------------------------------------------------------------------------
-// Job handler
+// Job handler — pg-boss v10 delivers an array of jobs per poll
 // ---------------------------------------------------------------------------
 
 /**
@@ -39,7 +39,7 @@ export async function handleImageValidationJob(
   const { request_id, image_url, metadata } = payloadResult.data;
   const typedMetadata = metadata as ImageMetadata;
   const userId = typedMetadata.user_id as string | undefined ?? null;
-  // pg-boss exposes the current attempt count via job.retryCount (0-indexed)
+  // pg-boss v10 exposes attempt count via retryCount (0-indexed)
   const attempt = (job as unknown as { retryCount?: number }).retryCount ?? 0;
 
   try {
@@ -75,28 +75,33 @@ export async function handleImageValidationJob(
 }
 
 // ---------------------------------------------------------------------------
+// Batch handler — pg-boss v10 work() handler receives Job[]
+// ---------------------------------------------------------------------------
+
+async function batchHandler(jobs: PgBoss.Job<unknown>[]): Promise<void> {
+  await Promise.all(jobs.map((job) => handleImageValidationJob(job)));
+}
+
+// ---------------------------------------------------------------------------
 // Worker registration
 // ---------------------------------------------------------------------------
 
 /**
- * Subscribe the job handler to the image-validation queue.
- * Returns the pg-boss instance for lifecycle management.
+ * Subscribe the batch handler to the image-validation queue.
+ * pg-boss v10: WorkOptions supports batchSize (controls fetch batch size)
+ * and pollingIntervalSeconds. Retry options (retryLimit, retryDelay,
+ * retryBackoff) are set on the job at send time by image-intake-webhook.
  */
 export async function startWorker(boss: PgBoss): Promise<void> {
   await boss.work<unknown>(
     QUEUE_NAME,
     {
-      teamSize: config.WORKER_CONCURRENCY,
-      teamConcurrency: config.WORKER_CONCURRENCY,
-      retryLimit: config.RETRY_LIMIT,
-      retryDelay: config.RETRY_DELAY_SECONDS,
-      retryBackoff: true,
-      expireInSeconds: 300,
+      batchSize: config.WORKER_CONCURRENCY,
     },
-    handleImageValidationJob
+    batchHandler
   );
 
   console.log(
-    `[worker] Subscribed to queue="${QUEUE_NAME}" concurrency=${config.WORKER_CONCURRENCY}`
+    `[worker] Subscribed to queue="${QUEUE_NAME}" batchSize=${config.WORKER_CONCURRENCY}`
   );
 }
