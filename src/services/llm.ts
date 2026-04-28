@@ -129,10 +129,13 @@ export async function callLLM(
  * Throws a descriptive error if parsing or Zod validation fails.
  */
 export function parseLLMResponse(rawText: string): LLMResult {
+  // Strip markdown code fences if the model wraps the JSON (e.g. ```json ... ```)
+  const cleaned = rawText.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+
   let parsed: unknown;
 
   try {
-    parsed = JSON.parse(rawText.trim());
+    parsed = JSON.parse(cleaned);
   } catch (err) {
     throw new Error(
       `LLM response is not valid JSON. Raw text: ${rawText.slice(0, 200)}`

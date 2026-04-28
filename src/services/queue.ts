@@ -30,6 +30,9 @@ export async function getBoss(): Promise<PgBoss> {
     });
 
     await boss.start();
+
+    // pg-boss v10: queues must be explicitly created before subscribing
+    await boss.createQueue(QUEUE_NAME);
     console.log('[queue] pg-boss started');
   }
   return boss;

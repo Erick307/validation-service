@@ -108,6 +108,166 @@ export async function insertValidationResult(
   return id;
 }
 
+// ---------------------------------------------------------------------------
+// Read helpers (Dashboard / Reader API)
+// ---------------------------------------------------------------------------
+
+export interface ValidationListRow {
+  id: string;
+  image_id: string;
+  image_url: string;
+  metadata: Record<string, unknown>;
+  status: RequestStatus;
+  user_id: string | null;
+  source: string;
+  created_at: Date;
+  // joined from validation_results (nullable when not yet completed)
+  verdict: string | null;
+  confidence_score: number | null;
+  overall_reasoning: string | null;
+  has_discrepancies: boolean | null;
+  flagged_issues: string[] | null;
+  validated_at: Date | null;
+}
+
+export interface ValidationStats {
+  total: number;
+  valid: number;
+  invalid: number;
+  needs_review: number;
+  queued: number;
+  processing: number;
+  failed: number;
+}
+
+/**
+ * List validation requests with their results, supporting pagination and
+ * optional status/verdict filters.
+ */
+export async function listValidations(opts: {
+  limit: number;
+  offset: number;
+  status?: string;
+  verdict?: string;
+}): Promise<{ rows: ValidationListRow[]; total: number }> {
+  const conditions: string[] = [];
+  const values: unknown[] = [];
+  let idx = 1;
+
+  if (opts.status) {
+    conditions.push(`vr.status = $${idx++}`);
+    values.push(opts.status);
+  }
+  if (opts.verdict) {
+    conditions.push(`res.verdict = $${idx++}`);
+    values.push(opts.verdict);
+  }
+
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  const countRes = await getPool().query<{ count: string }>(
+    `SELECT COUNT(*) AS count
+     FROM validation_requests vr
+     LEFT JOIN validation_results res ON res.request_id = vr.id
+     ${where}`,
+    values
+  );
+
+  const total = parseInt(countRes.rows[0].count, 10);
+
+  const dataRes = await getPool().query<ValidationListRow>(
+    `SELECT
+       vr.id, vr.image_id, vr.image_url, vr.metadata, vr.status,
+       vr.user_id, vr.source, vr.created_at,
+       res.verdict, res.confidence_score, res.overall_reasoning,
+       res.has_discrepancies, res.flagged_issues, res.validated_at
+     FROM validation_requests vr
+     LEFT JOIN validation_results res ON res.request_id = vr.id
+     ${where}
+     ORDER BY vr.created_at DESC
+     LIMIT $${idx++} OFFSET $${idx++}`,
+    [...values, opts.limit, opts.offset]
+  );
+
+  return { rows: dataRes.rows, total };
+}
+
+/**
+ * Fetch a single validation request + its result by request ID.
+ * Returns null if the request does not exist.
+ */
+export async function getValidationById(
+  id: string
+): Promise<ValidationListRow | null> {
+  const res = await getPool().query<ValidationListRow>(
+    `SELECT
+       vr.id, vr.image_id, vr.image_url, vr.metadata, vr.status,
+       vr.user_id, vr.source, vr.created_at,
+       res.verdict, res.confidence_score, res.overall_reasoning,
+       res.has_discrepancies, res.flagged_issues, res.validated_at
+     FROM validation_requests vr
+     LEFT JOIN validation_results res ON res.request_id = vr.id
+     WHERE vr.id = $1`,
+    [id]
+  );
+  return res.rows[0] ?? null;
+}
+
+/**
+ * Fetch just the status field for a request.
+ * Lightweight polling endpoint — avoids joining validation_results.
+ */
+export async function getValidationStatus(
+  id: string
+): Promise<{ status: RequestStatus } | null> {
+  const res = await getPool().query<{ status: RequestStatus }>(
+    `SELECT status FROM validation_requests WHERE id = $1`,
+    [id]
+  );
+  return res.rows[0] ?? null;
+}
+
+/**
+ * Aggregate counts across all validation requests and results.
+ */
+export async function getValidationStats(): Promise<ValidationStats> {
+  const res = await getPool().query<{
+    total: string;
+    valid: string;
+    invalid: string;
+    needs_review: string;
+    queued: string;
+    processing: string;
+    failed: string;
+  }>(
+    `SELECT
+       COUNT(*)                                              AS total,
+       COUNT(*) FILTER (WHERE res.verdict = 'valid')        AS valid,
+       COUNT(*) FILTER (WHERE res.verdict = 'invalid')      AS invalid,
+       COUNT(*) FILTER (WHERE res.verdict = 'needs_review') AS needs_review,
+       COUNT(*) FILTER (WHERE vr.status  = 'queued')        AS queued,
+       COUNT(*) FILTER (WHERE vr.status  = 'processing')    AS processing,
+       COUNT(*) FILTER (WHERE vr.status  = 'failed')        AS failed
+     FROM validation_requests vr
+     LEFT JOIN validation_results res ON res.request_id = vr.id`
+  );
+
+  const row = res.rows[0];
+  return {
+    total:        parseInt(row.total,        10),
+    valid:        parseInt(row.valid,         10),
+    invalid:      parseInt(row.invalid,       10),
+    needs_review: parseInt(row.needs_review,  10),
+    queued:       parseInt(row.queued,        10),
+    processing:   parseInt(row.processing,    10),
+    failed:       parseInt(row.failed,        10),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Audit log
+// ---------------------------------------------------------------------------
+
 /**
  * Insert an audit log entry. Uses a fresh pool connection (not transactional)
  * so audit logs are persisted even when the surrounding transaction rolls back.
