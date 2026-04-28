@@ -1,0 +1,23 @@
+version: "3.9"
+
+# This docker-compose is provided for convenience when running validation-service
+# standalone. In normal development, share the PostgreSQL instance started by
+# image-intake-webhook/docker-compose.yml and point DATABASE_URL at it.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: imageanalizer
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Apply the shared DB schema (owned by image-intake-webhook)
+      - ../image-intake-webhook/db/init.sql:/docker-entrypoint-initdb.d/init.sql
+
+volumes:
+  postgres_data:
