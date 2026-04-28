@@ -175,7 +175,7 @@ Submitted metadata:
 
 ```typescript
 const response = await anthropic.messages.create({
-  model: "claude-opus-4-5",          // configurable via env var
+  model: "claude-haiku-4-5-20251001", // configurable via env var
   max_tokens: 1024,
   system: SYSTEM_PROMPT,
   messages: [
@@ -366,7 +366,7 @@ validation-service/
 PORT=3001                          # Health check HTTP port (different from intake webhook)
 DATABASE_URL=postgresql://user:password@localhost:5432/imageanalizer
 ANTHROPIC_API_KEY=sk-ant-...       # Claude API key
-CLAUDE_MODEL=claude-sonnet-4-5     # LLM model string (resolved: Q1)
+CLAUDE_MODEL=claude-haiku-4-5-20251001  # LLM model string
 WORKER_CONCURRENCY=5               # Max concurrent jobs (pg-boss teamSize)
 RETRY_LIMIT=3                      # Max job attempts before DLQ
 RETRY_DELAY_SECONDS=5              # Initial retry delay (exponential backoff)
@@ -404,7 +404,7 @@ The worker will begin polling the `image-validation` pg-boss queue immediately.
 
 | # | Question | Owner | Status |
 |---|----------|-------|--------|
-| Q1 | Which Claude model should be used? | Product / Eng | ✅ Resolved — `claude-sonnet-4-5`. Best balance of speed, cost, and vision quality for this workload. |
+| Q1 | Which Claude model should be used? | Product / Eng | ✅ Resolved — `claude-haiku-4-5-20251001`. Optimized for speed and cost; suitable for this validation workload. |
 | Q2 | What are the exact validation rules for the demo? | Product | ✅ Resolved — see Section 7.1 for the finalized system prompt. |
 | Q3 | Should the worker run as a separate process/container from `image-intake-webhook`, or co-located? | Eng | ✅ Resolved — co-located for the demo. Both services share one container/process. Note: split into separate containers before any production or scaled deployment. |
 | Q4 | How should confidence score affect the final verdict? | Product | ✅ Resolved — three-state model: the LLM returns `"valid"`, `"invalid"`, or `"needs_review"` directly. No confidence threshold override applied in code. `confidence_score` is stored for dashboard display only. The `overall_valid` boolean in ARCHITECTURE.md is superseded by the `verdict` VARCHAR column. |
